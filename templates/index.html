@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Math Video Summarizer</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" />
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f8f9fa;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #0d6efd, #6610f2);
+      color: white;
+      padding: 5rem 1rem;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: 3rem;
+      font-weight: bold;
+    }
+
+    .hero p {
+      font-size: 1.25rem;
+      margin-bottom: 2rem;
+    }
+
+    .features i {
+      font-size: 2rem;
+      color: #0d6efd;
+    }
+
+    .how-it-works {
+      background-color: #ffffff;
+      padding: 4rem 1rem;
+    }
+
+    footer {
+      background-color: #212529;
+      color: #ccc;
+      padding: 2rem 1rem;
+      text-align: center;
+    }
+
+    footer a {
+      color: #0d6efd;
+      text-decoration: none;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <h1>📹 Math Video Summarizer</h1>
+      <p>Instantly summarize, extract formulas, and understand examples from any math video.</p>
+      <a href="#app" class="btn btn-light btn-lg">Try It Now</a>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section class="py-5 bg-light" id="features">
+    <div class="container">
+      <div class="row text-center mb-4">
+        <h2 class="fw-bold">Why Use Math Video Summarizer?</h2>
+        <p class="text-muted">Make math videos more accessible and efficient to learn from.</p>
+      </div>
+      <div class="row text-center g-4">
+        <div class="col-md-4">
+          <div class="p-3 border rounded shadow-sm h-100">
+            <div class="mb-3">
+              <i class="bi bi-lightbulb text-primary fs-1"></i>
+            </div>
+            <h5 class="fw-semibold">Smart Summarization</h5>
+            <p class="text-muted">Quickly grasp long math lectures with concise summaries.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="p-3 border rounded shadow-sm h-100">
+            <div class="mb-3">
+              <i class="bi bi-calculator text-info fs-1"></i>
+            </div>
+            <h5 class="fw-semibold">Formula Extraction</h5>
+            <p class="text-muted">Automatically detect LaTeX-style math formulas.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="p-3 border rounded shadow-sm h-100">
+            <div class="mb-3">
+              <i class="bi bi-check2-circle text-primary fs-1"></i>
+            </div>
+            <h5 class="fw-semibold">Clear Examples</h5>
+            <p class="text-muted">Understand step-by-step problems easily with solved examples.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How It Works Section -->
+  <section class="py-5" id="how-it-works">
+    <div class="container text-center">
+      <h2 class="fw-bold mb-4">How It Works</h2>
+      <div class="row g-4">
+        <div class="col-md-4">
+          <div class="p-3 border rounded shadow-sm h-100">
+            <h5 class="fw-semibold">1. Paste YouTube Link</h5>
+            <p class="text-muted">Enter a math-focused YouTube video link in the field below.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="p-3 border rounded shadow-sm h-100">
+            <h5 class="fw-semibold">2. Click "Get Summary"</h5>
+            <p class="text-muted">We process the video and extract summaries, formulas, and examples.</p>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="p-3 border rounded shadow-sm h-100">
+            <h5 class="fw-semibold">3. Explore the Output</h5>
+            <p class="text-muted">Review the concise summary, step-by-step examples, and formulas.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- App Section (Anchor Target) -->
+  <section id="app" class="py-5 bg-light">
+    <div class="container">
+      <h2 class="text-center fw-bold mb-4">Try the Tool</h2>
+
+      <div class="row justify-content-center">
+        <div class="col-md-10 col-lg-8">
+          <form id="youtubeForm" class="bg-white p-4 rounded shadow-sm">
+            <div class="mb-3">
+              <label for="youtubeUrlInput" class="form-label fw-semibold">Enter YouTube URL:</label>
+              <input type="url" class="form-control form-control-lg" id="youtubeUrlInput"
+                placeholder="https://www.youtube.com/watch?v=..." required />
+            </div>
+            <div class="d-grid">
+              <button type="submit" class="btn btn-primary btn-lg">Get Summary</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div id="resultsSection" class="d-none mt-5">
+        <div class="text-center mb-3">
+          <div class="btn-group mb-3" role="group">
+            <button type="button" class="btn btn-outline-secondary" onclick="showTab('summary')">
+              <i class="bi bi-card-text"></i> Summary
+            </button>
+
+            <button type="button" class="btn btn-outline-secondary" onclick="showTab('formulas')">
+              <i class="bi bi-function"></i> Formulas
+            </button>
+
+            <button type="button" class="btn btn-outline-secondary" onclick="showTab('examples')">
+              <i class="bi bi-lightbulb"></i> Examples
+            </button>
+          </div>
+
+        </div>
+
+        <div class="content-section" id="summary">
+          <h4 class="text-center">Summary</h4>
+          <p id="summaryText" class="border rounded p-3 bg-white shadow-sm">Loading...</p>
+        </div>
+        <div class="content-section d-none" id="formulas">
+          <h4 class="text-center">Formulas</h4>
+          <div id="formulasText" class="border rounded p-3 bg-white shadow-sm">No formulas found.</div>
+        </div>
+        <div class="content-section d-none" id="examples">
+          <h4 class="text-center">Examples</h4>
+          <div id="examplesText" class="border rounded p-3 bg-white shadow-sm">No examples found.</div>
+        </div>
+        <!-- Add this inside your #resultsSection div, below the summary/formulas/examples tabs -->
+
+        <div class="text-center mt-4" id="feedbackSection" style="display:none;">
+          <h5>Was this summary helpful?</h5>
+          <button class="btn btn-outline-success me-2" onclick="sendFeedback(1)" title="Yes">
+            <i class="bi bi-hand-thumbs-up fs-3"></i>
+          </button>
+          <button class="btn btn-outline-danger" onclick="sendFeedback(0)" title="No">
+            <i class="bi bi-hand-thumbs-down fs-3"></i>
+          </button>
+          <div id="feedbackMessage" class="mt-2 text-success fw-semibold"></div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <p>&copy; 2025 Math Video Summarizer. Built with 💙 for learners everywhere.</p>
+    <p><a href="#app">Try Now</a> | <a href="#">Privacy</a> | <a href="#">Contact</a></p>
+  </footer>
+
+  <!-- JavaScript -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <script>
+    function showTab(id) {
+      const tabIds = ["summary", "formulas", "examples"];
+
+      // Hide all content sections
+      tabIds.forEach(tab => {
+        const section = document.getElementById(tab);
+        section.classList.add("d-none");
+      });
+
+      // Remove active class from all buttons
+      document.querySelectorAll('.btn-group .btn').forEach(btn => {
+        btn.classList.remove("active");
+      });
+
+      // Show the selected section
+      document.getElementById(id).classList.remove("d-none");
+
+      // Highlight the active button
+      const activeBtn = document.querySelector(`.btn-group .btn[onclick*="${id}"]`);
+      if (activeBtn) activeBtn.classList.add("active");
+    }
+
+    const youtubeForm = document.getElementById("youtubeForm");
+    const youtubeUrlInput = document.getElementById("youtubeUrlInput");
+    const resultsSection = document.getElementById("resultsSection");
+    const summaryText = document.getElementById("summaryText");
+    const formulasText = document.getElementById("formulasText");
+    const examplesText = document.getElementById("examplesText");
+    const feedbackSection = document.getElementById("feedbackSection");
+    const feedbackMessage = document.getElementById("feedbackMessage");
+
+    youtubeForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      feedbackSection.style.display = 'none'; // hide during loading
+      feedbackMessage.textContent = '';       // reset message
+
+
+      const url = youtubeUrlInput.value.trim();
+      if (!url) {
+        alert("Please enter a valid YouTube URL");
+        return;
+      }
+
+      summaryText.innerHTML = `
+  <div class="d-flex flex-column justify-content-center align-items-center" style="height: 150px;">
+    <div class="spinner-border text-primary mb-3" role="status" style="width: 3rem; height: 3rem;">
+      <span class="visually-hidden">Processing...</span>
+    </div>
+    <div class="text-muted">Processing... this might take up to 2 minutes depending on video length.</div>
+  </div>
+`;
+
+
+      formulasText.textContent = "";
+      examplesText.textContent = "";
+      resultsSection.classList.remove("d-none");
+      showTab("summary");
+
+      try {
+        const response = await fetch("/youtube", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url })
+        });
+
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+
+        summaryText.innerHTML = data.summary;
+        formulasText.innerHTML = data.formulas.length
+          ? data.formulas.map(f => `<p>${f}</p>`).join('')
+          : "<p>No formulas found.</p>";
+        examplesText.innerHTML = data.examples.length
+          ? data.examples.map(e => `<p>${e}</p>`).join('')
+          : "<p>No examples found.</p>";
+
+        if (window.MathJax) MathJax.typesetPromise();
+        // Now that MathJax is done rendering, show feedback buttons
+        feedbackSection.style.display = 'block';
+
+      } catch (err) {
+        summaryText.textContent = "Error: " + err.message;
+        showTab("summary");
+      }
+    });
+
+
+
+    // Show feedback buttons once summary loads
+    function showFeedback() {
+      feedbackSection.style.display = "block";
+      feedbackMessage.textContent = "";
+    }
+
+    // Call this at the end of successful summary fetch:
+    youtubeForm.addEventListener("submit", async (e) => {
+      // existing code ...
+
+      try {
+        // existing fetch and UI update code ...
+
+        showFeedback();  // Show feedback buttons here after data is loaded
+
+      } catch (err) {
+        // existing error handling...
+      }
+    });
+
+    async function sendFeedback(reward) {
+      feedbackMessage.textContent = "Sending feedback...";
+      const url = youtubeUrlInput.value.trim();
+      const summary = summaryText.innerText || summaryText.textContent;  // get the displayed summary text
+
+      try {
+        const response = await fetch("/feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: getUserId(),
+            video_url: url,
+            summary: summary,     // send summary here
+            feedback: reward,     // rename reward to feedback for clarity (optional)
+            timestamp: new Date().toISOString()
+          }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          feedbackMessage.textContent = "Thanks for your feedback!";
+        } else {
+          throw new Error(data.error || "Failed to send feedback");
+        }
+      } catch (err) {
+        feedbackMessage.textContent = "Error: " + err.message;
+      }
+    }
+
+
+    // Simple user ID generator stored in localStorage for persistence
+    function getUserId() {
+      let uid = localStorage.getItem("mv_summarizer_uid");
+      if (!uid) {
+        uid = "user_" + Math.random().toString(36).substring(2, 15);
+        localStorage.setItem("mv_summarizer_uid", uid);
+      }
+      return uid;
+    }
+
+  </script>
+</body>
+
+</html>
