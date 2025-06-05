@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, render_template
+from word2number import w2n
 
 from flask import Flask, request, jsonify
 import whisper
@@ -43,7 +44,15 @@ def load_whisper_model():
 
 whisper_model = load_whisper_model()
 
-summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+from transformers import pipeline
+
+# Standard summarizer for default summaries
+summarizer_standard = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+
+# Creative summarizer that supports prompts
+summarizer_prompt = pipeline("text2text-generation", model="google/flan-t5-base", tokenizer="google/flan-t5-base")
+
+
 
 
 DOWNLOAD_FOLDER = "downloads"
@@ -86,7 +95,8 @@ def download_youtube_audio(url):
             'preferredcodec': 'wav',
         }],
         'quiet': True,
-        'noplaylist': True
+        'noplaylist': True,
+        'ffmpeg_location': r'C:\Users\SAMIKSHA\Downloads\ffmpeg-7.1.1-essentials_build\ffmpeg-7.1.1-essentials_build\bin',  # <-- update this to your actual ffmpeg bin path
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -194,135 +204,186 @@ def read_subtitle_text(vtt_path):
 
 def extract_formulas(text):
     formulas = set()
+    text = text.lower()
+    text = convert_word_math_to_symbols(text)
+    # --- Canonical pi extraction ---
+    pi_def_pattern = r'pi\s*(is|equals|=|is approximately|is about|≈|~)?\s*(approximately|equal to|equal|about|)?\s*(=|≈|~|is|equals|is approximately|is about|)?\s*(22\s*/\s*7|3\.14|3,14|3\s*\.\s*14|22\s*over\s*7)(?:\s*(or|,|and)\s*(3\.14|3,14|3\s*\.\s*14|22\s*/\s*7|22\s*over\s*7))?'
+    pi_matches = re.findall(pi_def_pattern, text)
+    if pi_matches:
+        # Only add if the value is present in the match
+        for match in pi_matches:
+            value = match[3].replace(' ', '')
+            if value in ['22/7', '3.14', '3,14', '3.14', '22over7']:
+                if '22/7' in value or '22over7' in value:
+                    formulas.add('pi ≈ 22/7')
+                if '3.14' in value or '3,14' in value:
+                    formulas.add('pi ≈ 3.14')
+    else:
+        pi_patterns = [
+            r'pi\s*(is|equals|=|is approximately|is about|≈|~)\s*(approximately\s*)?(22\s*/\s*7|3\.14|3,14|3\s*\.\s*14|22\s*over\s*7)',
+            r'pi\s*(≈|~|=|equals|is)\s*(22\s*/\s*7|3\.14|3,14|3\s*\.\s*14|22\s*over\s*7)',
+            r'pi\s*(is|equals|=|is approximately|is about|≈|~)\s*(approximately\s*)?(3\.14|3,14|3\s*\.\s*14)',
+        ]
+        for pat in pi_patterns:
+            m = re.search(pat, text)
+            if m:
+                value = m.group(m.lastindex).replace(' ', '') if m.lastindex else ''
+                if value in ['22/7', '3.14', '3,14', '3.14', '22over7']:
+                    if '22/7' in value or '22over7' in value:
+                        formulas.add('pi ≈ 22/7')
+                    if '3.14' in value or '3,14' in value:
+                        formulas.add('pi ≈ 3.14')
+                break
+    # --- NEW: Extract formulas after 'the formula of ... is' or 'formula is' ---
+    formula_callout_patterns = [
+        r'the formula of [^\n\r:]* is ([^\n\r\.;,]+)',
+        r'formula is ([^\n\r\.;,]+)'
+    ]
+    for pat in formula_callout_patterns:
+        for match in re.finditer(pat, text):
+            candidate = match.group(1).strip()
+            # Only add if it looks like a formula (contains = and at least one variable)
+            if '=' in candidate and re.search(r'[a-z]', candidate):
+                # Remove trailing explanations
+                cleaned = candidate.split('.')[0].split(',')[0].split('(')[0].strip()
+                formulas.add(cleaned)
+    # Only match formulas with at least one variable (not just numbers)
+    formula_pattern = r'\b([a-z][a-z0-9_\^]*)\s*=\s*([a-z0-9_\^\s\+\-\*/^=×÷\.]+)\b'
+    for match in re.finditer(formula_pattern, text):
+        formula = match.group(0)
+        left, right = re.split(r'\s*=\s*', formula, maxsplit=1)
+        # Remove trailing explanations (after '.', ',', '(', 'since', 'so', 'because', etc.)
+        cleaned = formula.split('.')[0].split(',')[0].split('(')[0].split('  ')[0].strip()
+        cleaned = re.sub(r'\b(since|so|because|as|where|when|if|let|then|which|that|with|for|by|to|from|after|before|while|although|though|even|however|but|and|or|also|such|other|some|any|all|each|every|no|yes|one|two|three|four|five|six|seven|eight|nine|zero)\b.*$', '', cleaned).strip()
+        if '=' in cleaned:
+            left_clean, right_clean = [s.strip() for s in cleaned.split('=', 1)]
+            # Exclude if right side is just a vague phrase (not a number/variable)
+            vague_rights = {'approximately equal', 'approximately', 'equal', 'about', 'equal to', 'is', 'equals', 'is approximately', 'is about', '≈', '~'}
+            if right_clean in vague_rights:
+                continue
+            # Exclude if either side is not a valid variable/expression (e.g., single word, 'example', etc.)
+            if (re.fullmatch(r'[a-z][a-z0-9_\^]*', left_clean) or re.search(r'[a-z]', right_clean)):
+                if not (left_clean.replace('.', '', 1).isdigit() and right_clean.replace('.', '', 1).isdigit()):
+                    if not re.match(r'^\d+(\.\d+)?\s*[a-z]+', right_clean):
+                        if left_clean not in {'example', 'th', 'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'being', 'been'} and right_clean not in {'example', 'th', 'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'being', 'been'}:
+                            # Exclude verbose pi explanations (already handled above)
+                            if not re.match(r'pi\s*=.*(22/7|3.14)', cleaned):
+                                if len(left_clean) > 1 and len(right_clean) > 1:
+                                    formulas.add(cleaned)
+    # Add advanced math patterns (integrals, limits, etc.)
+    advanced_patterns = [
+        r'integral from [^ ]+ to [^ ]+ of [^ ]+ d[a-z]',
+        r'limit as [a-z] approaches [^ ]+ of [^\.\n]+',
+        r'square root of [^\s]+',
+        r'cube root of [^\s]+',
+        r'log of [^\s]+',
+        r'ln of [^\s]+',
+        r'sum from [^ ]+ to [^ ]+ of [^\.\n ]+',
+        r'product from [^ ]+ to [^ ]+ of [^\.\n ]+',
+    ]
+    for pat in advanced_patterns:
+        for match in re.findall(pat, text):
+            formulas.add(match.strip())
+    # Return sorted, unique formulas
+    return sorted(set(f for f in formulas if len(f) > 2), key=len, reverse=True)
 
-    # Extract basic math expressions like a + b, x^2, etc.
-    symbol_formulas = re.findall(r'\b[a-zA-Z0-9]+\s*[\+\-\*/\^]\s*[a-zA-Z0-9]+\b', text)
-    formulas.update(symbol_formulas)
-
-    # Extract written fractions but ignore unhelpful ones like 1 over 1, 3 over 3
-    written_fractions = re.findall(r'\b(\d+)\s+over\s+(\d+)\b', text)
-    for num, den in written_fractions:
-        if num != den:  # ignore 1 over 1, 3 over 3, etc.
-            formulas.add(f"{num} over {den}")
-
-    # Add support for "x squared", "x cubed"
-    powers = re.findall(r'\b([a-zA-Z])\s+(squared|cubed)\b', text)
-    for var, power in powers:
-        if power == "squared":
-            formulas.add(f"{var}^2")
-        elif power == "cubed":
-            formulas.add(f"{var}^3")
-
-    return sorted(formulas, key=len, reverse=True)
-
-
-import re
+def convert_word_math_to_symbols(text):
+    text = text.lower()
+    # Convert number words to digits using word2number (w2n)
+    def replace_number_words(match):
+        try:
+            return str(w2n.word_to_num(match.group(0)))
+        except Exception:
+            return match.group(0)
+    # This regex matches number words and hyphenated/compound numbers
+    text = re.sub(r'\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|'
+                  r'eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|'
+                  r'eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|'
+                  r'eighty|ninety|hundred|thousand)(?:[\s-](zero|one|two|three|four|five|six|seven|eight|nine))?\b',
+                  replace_number_words, text)
+    # Replace math operators and keywords
+    replacements = [
+        (r'is equal to|equals|is', '='),
+        (r'plus', '+'),
+        (r'minus', '-'),
+        (r'times|multiplied by', '*'),
+        (r'divided by|over', '/'),
+        (r'squared', '^2'),
+        (r'cubed', '^3'),
+        (r'to the power of (\d+)', r'^\1'),
+        (r'square root of ([a-z0-9]+)', r'sqrt(\1)'),
+        (r'cube root of ([a-z0-9]+)', r'cbrt(\1)'),
+        (r'integral from ([^ ]+) to ([^ ]+) of ([^ ]+) d([a-z])', r'int_{\1}^{\2} \3 d\4'),
+        (r'limit as ([a-z]) approaches ([^ ]+) of ([^\.\n]+)', r'lim_{\1 \to \2} \3'),
+    ]
+    for pat, repl in replacements:
+        text = re.sub(pat, repl, text)
+    return text
 
 def clean_text(text):
     """Normalize spaces, lowercase, remove punctuation except math symbols."""
     text = re.sub(r"\s+", " ", text)              # Collapse multiple spaces
     text = re.sub(r"[^\w\s=+\-*/^0-9.]", "", text) # Remove most punctuation
     return text.lower().strip()
-NUMBER_WORDS = {
-    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
-    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
-    "ten": "10"
-}
-from word2number import w2n
-
-def convert_word_math_to_symbols(text):
-    text = text.lower()
-
-    # Replace phrases like "is equal to", "equals" with "=" first
-    text = re.sub(r'\bis equal to\b|\bequals\b', '=', text)
-
-    # Replace math operators
-    text = re.sub(r'\bplus\b', '+', text)
-    text = re.sub(r'\bminus\b', '-', text)
-    text = re.sub(r'\btimes\b|\bmultiplied by\b', '*', text)
-    text = re.sub(r'\bdivided by\b', '/', text)
-
-    # Convert number words to digits using word2number
-    def replace_number_words(match):
-        try:
-            return str(w2n.word_to_num(match.group(0)))
-        except:
-            return match.group(0)
-
-    # Match potential number phrases like "twenty five"
-    text = re.sub(r'\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|'
-                  r'eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|'
-                  r'eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|'
-                  r'eighty|ninety|hundred|thousand)(?:[\s-](?:one|two|three|four|five|six|seven|eight|nine))?\b',
-                  replace_number_words, text)
-
-    return text
-
-
 
 def extract_examples(text):
-    math_phrase_replacements = {
-        r'\bone\s+plus\s+one\s+plus\s+one\b': '1 + 1 + 1',
-        r'\bone\s+plus\s+one\b': '1 + 1',
-        r'\btwo\s+minus\s+one\b': '2 - 1',
-        r'\bthree\s+minus\s+two\b': '3 - 2',
-        r'\bfour\s+plus\s+four\b': '4 + 4',
-        r'\bbinary\s+equivalent\s+of\s+3\s+is\s+1\s+1\b': 'Binary of 3 = 11',
-        r'\bis\s+equal\s+to\b': '=',
-        r'\bit\s+is\s+equal\s+to\b': '=',
-        r'\bequals\b': '=',
-    }
-
-    for pattern, replacement in math_phrase_replacements.items():
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-
-    trigger_phrases = r"(?:for example|say we have|let's say|suppose|consider|imagine|assume)"
-    pattern = rf"({trigger_phrases}[^\.!?]*[\.!?](?:\s[^\.!?]*[\.!?])?)"
-    matches = re.findall(pattern, text, re.IGNORECASE)
-
-    seen = set()
+    """
+    Extracts step-by-step numeric examples from text, grouping consecutive lines with numeric calculations and short explanations.
+    Filters out lines that contain 'th=' as a whole word, but does NOT filter out 'the'.
+    Returns a list of examples, each possibly multi-line.
+    """
     examples = []
-    for match in matches:
-        match = match.strip()
-        match_cleaned = clean_text(match)
-        if match_cleaned not in seen:
-            seen.add(match_cleaned)
-            converted = convert_word_math_to_symbols(match)
-            examples.append(converted)
-
-
+    text = text.lower()
+    text = convert_word_math_to_symbols(text)
+    lines = re.split(r'[\n\r]+', text)
+    current_example = []
+    blank_count = 0
+    example_pattern = r'\b(\d+(?:\s*[=\+\-\*/^]\s*\d+)+)\b'
+    allowed_expl = set(['so', 'then', 'thus', 'therefore', 'step', 'answer', 'solution', 'hence', 'now', 'let', 'if', 'since', 'because', 'as', 'to', 'for', 'by', 'from', 'after', 'before', 'while', 'although', 'though', 'even', 'however', 'but', 'and', 'or', 'also'])
+    def is_th_equals(line):
+        # Only match 'th=' as a whole word, not as a substring (so 'the' is not matched)
+        return bool(re.search(r'\bth=\b', line))
+    for line in lines:
+        line = line.strip()
+        if not line:
+            blank_count += 1
+            if blank_count >= 2 and current_example:
+                filtered = [l for l in current_example if not is_th_equals(l)]
+                if filtered:
+                    examples.append(' '.join(filtered))
+                current_example = []
+            continue
+        blank_count = 0
+        found = False
+        for match in re.finditer(example_pattern, line):
+            expr = match.group(0)
+            if all(part.strip().replace('.', '', 1).isdigit() for part in re.split(r'[=\+\-\*/^]', expr) if part.strip()):
+                found = True
+        # Allow short explanation lines within an example
+        if found or (len(line.split()) <= 5 and any(word in line for word in allowed_expl)) and not is_th_equals(line):
+            current_example.append(line)
+        else:
+            if current_example:
+                filtered = [l for l in current_example if not is_th_equals(l)]
+                if filtered:
+                    examples.append(' '.join(filtered))
+                current_example = []
+    if current_example:
+        filtered = [l for l in current_example if not is_th_equals(l)]
+        if filtered:
+            examples.append(' '.join(filtered))
+    # Remove duplicates and sort by length (longest first)
+    examples = sorted(set(e for e in examples if len(e) > 2), key=len, reverse=True)
     return examples
-
-
-
-
 from flask import request, jsonify
 
-@app.route('/feedback', methods=['POST'])
-def feedback():
-    data = request.get_json()
-
-    user_id = data.get('user_id', 'anonymous')
-    video_url = data.get('video_url', '')
-    summary = data.get('summary', '')  # Use .get() to avoid KeyError
-    user_feedback = data.get('feedback')
-
-    # Log for debugging
-    print(f"User: {user_id}, Video: {video_url}, Feedback: {user_feedback}, Summary: {summary[:30]}...")
-
-    # Save to SQLite here
-    try:
-        save_feedback(user_id, video_url, summary, user_feedback)
-    except Exception as e:
-        print(f"Error saving feedback to DB: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-    return jsonify({"status": "success"})
-
+# --- RL summary stats: match keys to summary types ---
 summary_stats = {
-    "variant_1": {"count": 0, "total_reward": 0},
-    "variant_2": {"count": 0, "total_reward": 0},
-    # etc
+    "short": {"count": 0, "total_reward": 0},
+    "medium": {"count": 0, "total_reward": 0},
+    "long": {"count": 0, "total_reward": 0},
+    "formal": {"count": 0, "total_reward": 0},
+    "simple": {"count": 0, "total_reward": 0},
 }
 
 def select_summary_variant(epsilon=0.1):
@@ -336,81 +397,59 @@ def select_summary_variant(epsilon=0.1):
         return max(avg_rewards, key=avg_rewards.get)
 
 def update_summary_stats(variant, reward):
-    stat = summary_stats[variant]
-    stat["count"] += 1
-    stat["total_reward"] += reward
+    if variant in summary_stats:
+        stat = summary_stats[variant]
+        stat["count"] += 1
+        stat["total_reward"] += reward
+
+@app.route('/feedback', methods=['POST'])
+def feedback():
+    data = request.get_json()
+
+    user_id = data.get('user_id', 'anonymous')
+    video_url = data.get('video_url', '')
+    summary = data.get('summary', '')  # Use .get() to avoid KeyError
+    user_feedback = data.get('feedback')
+    summary_type = data.get('summary_type', None)  # Optional
+    variant_used = data.get('variant')  # NEW: Used for RL update
+
+    # Log for debugging
+    print(f"User: {user_id}, Video: {video_url}, Feedback: {user_feedback}, Summary: {summary[:30]}...")
+
+    try:
+        # Save feedback to DB
+        save_feedback(user_id, video_url, summary, user_feedback)
+
+        # Update RL stats using either summary_type or variant
+        if summary_type and user_feedback is not None:
+            update_summary_stats(summary_type, int(user_feedback))
+        elif variant_used and user_feedback is not None:
+            update_summary_stats(variant_used, int(user_feedback))
+
+    except Exception as e:
+        print(f"Error saving feedback to DB: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    return jsonify({"status": "success"})
 
 
-def generate_summary_variants(text, formulas):
-    variants = {}
-    for name, max_len in [("short", 100), ("medium", 250), ("long", 400)]:
-        chunks = split_text(text, max_words=500)
-        summaries = []
-        for chunk in chunks:
-            replaced = replace_formulas_with_placeholders(chunk, formulas)
-            summary_result = summarizer(replaced, max_length=max_len, min_length=50, do_sample=False)
-            summary_text = summary_result[0]['summary_text']
-            final_summary = reinject_formulas(summary_text, formulas)
-            summaries.append(final_summary)
-        variants[name] = "\n\n".join(summaries)
-    return variants
-
-
-
-
-
-
-
-
-def replace_formulas_with_placeholders(text, formulas):
-    for i, f in enumerate(formulas):
-        placeholder = f"[FORMULA_{i}]"
-        text = re.sub(re.escape(f), placeholder, text)
-    return text
-
-def reinject_formulas(text, formulas):
-    for i, f in enumerate(formulas):
-        placeholder = f"[FORMULA_{i}]"
-        converted = words_to_math_symbols(f)
-        text = text.replace(placeholder, f"\\({converted}\\)")
-    return text
-
-
-
-
-def split_text(text, max_words=500):
-    words = text.split()
-    return [" ".join(words[i:i + max_words]) for i in range(0, len(words), max_words)]
-
-def summarize_large_text_with_formulas(text, formulas):
-    chunks = split_text(text, max_words=500)
-    summaries = []
-    for chunk in chunks:
-        replaced = replace_formulas_with_placeholders(chunk, formulas)
-        summary_result = summarizer(replaced, max_length=250, min_length=100, do_sample=False)
-        summary_text = summary_result[0]['summary_text']
-        final_summary = reinject_formulas(summary_text, formulas)
-        summaries.append(final_summary)
-    return "\n\n".join(summaries)
-
-# ----------- Routes -----------
-
-@app.route("/")
-def home():
-    return render_template("index.html")
-
+# --- Main summary endpoint: use RL to select personalized summary ---
 @app.route("/youtube", methods=["POST"])
 def youtube_summary():
     try:
         data = request.get_json()
         raw_url = data.get("url")
+        summary_type_raw = data.get("summary_type", "summary_medium")
+        summary_type = summary_type_raw.replace("summary_", "")
+
+
         if not raw_url:
             return jsonify({"error": "No URL provided"}), 400
 
         url = clean_youtube_url(raw_url)
 
-        # ✅ Prefer subtitles over transcription if available
-        if has_subtitles(url):
+        # Prefer subtitles over transcription if available
+        if not has_subtitles(url):
             print("✅ Using subtitles instead of transcription.")
             subs_path = download_youtube_subtitles(url)
             combined_text = read_subtitle_text(subs_path)
@@ -421,20 +460,220 @@ def youtube_summary():
             combined_text = transcript
 
         # Extract formulas and examples
+        print("--- Combined Text for Extraction (first 500 chars) ---\n", combined_text[:500])
         formulas = extract_formulas(combined_text)
+        print("Extracted formulas:", formulas)
         examples = extract_examples(combined_text)
+        print("Extracted examples:", examples)
 
-        # Summarize using combined text and formulas
-        summary = summarize_large_text_with_formulas(combined_text, formulas)
+        # Generate only the requested summary type
+        summary_generators = {
+            "short": summarize_text_short,
+            "medium": summarize_text_medium,
+            "long": summarize_text_long,
+            "formal": summarize_text_formal,
+            "simple": summarize_text_simplified
+        }
+
+        if summary_type not in summary_generators:
+            return jsonify({"error": f"Invalid summary type: {summary_type}"}), 400
+
+        summary = summary_generators[summary_type](combined_text)
 
         return jsonify({
             "summary": summary,
+            "summary_type": summary_type,
             "formulas": [f"\\({words_to_math_symbols(f)}\\)" for f in formulas],
             "examples": examples
         })
 
     except Exception as e:
         print("🔥 Error:", str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+# ----------- Routes -----------
+
+def safe_summarize(text, max_len, min_len):
+    if not text.strip():
+        print("safe_summarize: Empty input text.")
+        return ""
+    try:
+        result = summarizer_standard(text, max_length=max_len, min_length=min_len, do_sample=False)
+        if not result:
+            print("safe_summarize: Summarizer returned empty result list.")
+            return ""
+        if 'summary_text' not in result[0]:
+            print(f"safe_summarize: 'summary_text' missing in summarizer output: {result}")
+            return ""
+        return result[0]['summary_text']
+    except Exception as e:
+        print(f"Summarizer error: {e}")
+    return ""
+
+def split_text(text, max_words=500):
+    words = text.split()
+    return [" ".join(words[i:i + max_words]) for i in range(0, len(words), max_words)]
+
+def summarize_text_short(text):
+    chunks = split_text(text, max_words=500)
+    summaries = []
+    for chunk in chunks:
+        summary = safe_summarize(chunk, max_len=100, min_len=30)
+        if summary:
+            summaries.append(summary)
+    return "\n\n".join(summaries)
+
+def summarize_text_medium(text):
+    chunks = split_text(text, max_words=500)
+    summaries = []
+    for chunk in chunks:
+        summary = safe_summarize(chunk, max_len=250, min_len=80)
+        if summary:
+            summaries.append(summary)
+    return "\n\n".join(summaries)
+
+def summarize_text_long(text):
+    chunks = split_text(text, max_words=500)
+    summaries = []
+    for chunk in chunks:
+        summary = safe_summarize(chunk, max_len=400, min_len=150)
+        if summary:
+            summaries.append(summary)
+    return "\n\n".join(summaries)
+
+def summarize_text_formal(text):
+    prompt_prefix = "Please provide a formal summary:\n\n"
+    max_chunk_words = 400  # smaller chunk size for prompt+text
+    chunks = split_text(text, max_words=max_chunk_words)
+    summaries = []
+    for chunk in chunks:
+        prompt = prompt_prefix + chunk
+        summary = safe_summarize(prompt, max_len=250, min_len=80)
+        if summary:
+            summaries.append(summary)
+    return "\n\n".join(summaries)
+
+
+def summarize_text_simplified(text):
+    prompt_prefix = "Summarize the following text in simple language:\n\n"
+    max_chunk_words = 400  # reduce chunk size if needed
+
+    chunks = split_text(text, max_words=max_chunk_words)
+    summaries = []
+
+    for chunk in chunks:
+        prompt = prompt_prefix + chunk
+        summary = safe_summarize(prompt, max_len=200, min_len=80)
+        if summary:
+            summaries.append(summary)
+
+    return "\n\n".join(summaries)
+
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+
+def creative_summarize(text, summary_type="medium", max_len=200, min_len=80):
+    try:
+        if summary_type in ["formal", "simple"]:
+            # Use FLAN for instruction-style prompts
+            if summary_type == "formal":
+                prompt = f"Please provide a formal summary:\n\n{text}"
+            elif summary_type == "simple":
+                prompt = f"Summarize the following text in simple language:\n\n{text}"
+
+            result = summarizer_prompt(
+                prompt,
+                max_length=max_len,
+                min_length=min_len,
+                do_sample=True,
+                temperature=1.0,
+                top_k=50,
+                top_p=0.95,
+                num_return_sequences=1,
+            )
+            if result and 'generated_text' in result[0]:
+                return result[0]['generated_text']
+
+        else:
+            # Use distilbart for short, medium, long (no prompt)
+            length_config = {
+                "short": (100, 30),
+                "medium": (250, 80),
+                "long": (400, 150)
+            }
+            max_l, min_l = length_config.get(summary_type, (250, 80))
+            result = summarizer_standard(
+                text,
+                max_length=max_l,
+                min_length=min_l,
+                do_sample=False
+            )
+            if result and 'summary_text' in result[0]:
+                return result[0]['summary_text']
+
+    except Exception as e:
+        print(f"❌ creative_summarize error: {e}")
+    return ""
+
+
+@app.route('/resummarize', methods=['POST'])
+def resummarize():
+    try:
+        data = request.get_json()
+        raw_url = data.get("url")
+        summary_type = data.get("summary_type", "summary_medium").replace("summary_", "")
+        user_id = data.get("user_id", "anonymous")
+
+        if not raw_url:
+            return jsonify({"error": "Missing YouTube URL"}), 400
+
+        url = clean_youtube_url(raw_url)
+
+        # ✅ Prefer subtitles over transcription
+        if has_subtitles(url):
+            subs_path = download_youtube_subtitles(url)
+            combined_text = read_subtitle_text(subs_path)
+        else:
+            audio_path = download_youtube_audio(url)
+            combined_text = transcribe_audio(audio_path)
+
+        # ✅ Validate transcript
+        if not combined_text or len(combined_text.strip()) < 50:
+            return jsonify({"error": "Transcript is too short or empty."}), 400
+
+        # ✅ Only generate the requested summary type using the proper model
+        summary_lengths = {
+            "short": (100, 30),
+            "medium": (250, 80),
+            "long": (400, 150),
+            "formal": (250, 80),
+            "simple": (200, 80)
+        }
+
+        if summary_type not in summary_lengths:
+            return jsonify({"error": f"Invalid summary type: {summary_type}"}), 400
+
+        max_len, min_len = summary_lengths[summary_type]
+        new_summary = creative_summarize(
+            text=combined_text,
+            summary_type=summary_type,
+            max_len=max_len,
+            min_len=min_len
+        )
+
+        # ✅ Store feedback (neutral for now)
+        save_feedback(user_id, url, new_summary, 0)
+
+        return jsonify({
+            "new_summary": new_summary,
+            "variant": f"summary_{summary_type}"
+        })
+
+    except Exception as e:
+        print("🔥 Error (resummarize):", str(e))
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
